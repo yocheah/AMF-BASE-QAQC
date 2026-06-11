@@ -20,6 +20,26 @@ def handler(monkeypatch):
     return DataQAQCAutoRunHandler()
 
 
+@pytest.mark.parametrize('custom_lookback, expected_result',
+                         [({}, 24),
+                          ({'Friday': 48}, 24),
+                          ({'Thursday': 48}, 48),
+                          ({'Thursday': '18'}, 18.0),
+                          ({'Thursday': 'hey'}, 24)],
+                         ids=['no-customization', 'diff day',
+                              'custom_day', 'custom_str', 'bad_hour'])
+def test_calculate_lookback_time(
+        custom_lookback, expected_result, handler):
+    handler.default_lookback_time_h = 24
+    handler.custom_lookback_lookup_h = custom_lookback
+
+    test_process_dt = dt.strptime(
+        '2026-06-11 13:00', '%Y-%m-%d %H:%M')
+
+    lookback_time = handler.calculate_lookback_time(test_process_dt)
+    assert lookback_time == expected_result
+
+
 @pytest.mark.parametrize('ts_jira, ts_format, expected_result',
                          [('2025-09-11T11:19:09.000-0700',
                            JIRATimestamp.jira_dt_api,

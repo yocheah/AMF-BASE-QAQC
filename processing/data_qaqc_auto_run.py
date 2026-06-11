@@ -29,7 +29,7 @@ class DataQAQCAutoRunHandler:
         self.db_conn_pool = {}
         self.jira_reporter, self.jira_host, self.jira_issue_path, \
             self.jira_project, self.jira_pause_seconds, \
-            self.data_auto_lookback_time, \
+            self.default_lookback_time_h, self.custom_lookback_lookup_h, \
             self.qaqc_processor_email, \
             self.amp_team_email, self.is_test, \
             self.test_jira_project = self._read_cfg(cfg_file)
@@ -120,9 +120,16 @@ class DataQAQCAutoRunHandler:
 
             cfg_section = 'DATA_AUTO'
             if config.has_section(cfg_section):
-                if config.has_option(cfg_section, 'data_auto_lookback_time_h'):
-                    data_auto_lookback_time = config.getint(
-                        cfg_section, 'data_auto_lookback_time_h')
+                if config.has_option(cfg_section,
+                                     'data_auto_default_lookback_time_h'):
+                    default_lookback_time_h = config.getint(
+                        cfg_section, 'data_auto_default_lookback_time_h')
+                try:
+                    custom_lookback_lookup_h: dict = ast.literal_eval(
+                        config.get(
+                            cfg_section, 'data_auto_custom_lookback_h'))
+                except Exception:
+                    custom_lookback_lookup_h = {}
 
             cfg_section = 'AMP'
             if config.has_section(cfg_section):
@@ -148,7 +155,7 @@ class DataQAQCAutoRunHandler:
 
             return reporter, jira_host, jira_issue_path, \
                 jira_project, jira_pause_seconds, \
-                data_auto_lookback_time, \
+                default_lookback_time_h, custom_lookback_lookup_h, \
                 qaqc_processor_email, amp_team_email, \
                 is_test, test_jira_project
 
@@ -160,6 +167,33 @@ class DataQAQCAutoRunHandler:
         _log.disable_file_handler(process_file_handler_name,
                                   close_handler=True)
         _log.add_root_file_handler(_log_file_handler)
+
+    def calculate_lookback_time(self, process_dt):
+        """
+        Modify the lookback time if there is a custom adjustment
+        {'day_of_week': hours}
+        """
+        if not self.custom_lookback_lookup_h:
+            return self.default_lookback_time_h
+
+        day_of_week = process_dt.strftime('%A')
+
+        if day_of_week not in self.custom_lookback_lookup_h.keys():
+            return self.default_lookback_time_h
+
+        custom_lookback = self.custom_lookback_lookup_h.get(
+            day_of_week, self.default_lookback_time_h)
+
+        if (isinstance(custom_lookback, int) or
+                isinstance(custom_lookback, float)):
+            return custom_lookback
+
+        try:
+            float(custom_lookback)
+            return float(custom_lookback)
+        except Exception:
+            _log.warning('Could not parse custom lookback time, using default')
+            return self.default_lookback_time_h
 
     @staticmethod
     def check_all_jira_statuses_resolved(
@@ -769,8 +803,10 @@ class DataQAQCAutoRunHandler:
             self.ts_util.JIRA_TS_FORMAT)
         _log.info(f'Data Auto Run starting at {start_processing_str}')
 
+        lookback_time = self.calculate_lookback_time(start_processing_dt)
+
         lookback_dt = start_processing_dt - timedelta(
-            hours=self.data_auto_lookback_time)
+            hours=lookback_time)
 
         lookback_str = lookback_dt.strftime(
             self.ts_util.JIRA_TS_FORMAT)
